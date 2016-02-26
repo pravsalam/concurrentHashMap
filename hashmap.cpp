@@ -33,7 +33,7 @@ class CHashMap
 		struct Bucket buckarray[MAX_HASH_SIZE];
 		struct Segment segments[MAX_HASH_SIZE];
 		struct Segment& getSegment(int hash);
-		//struct Bucket* getFreeBucketInCacheLine(struct Segment segment);
+		struct Bucket* getFreeBucketInCacheLine(struct Segment &segment);
 	public:
 		CHashMap();
 		int add(int key ,int data);
@@ -59,7 +59,7 @@ CHashMap::CHashMap()
 		}
 	}
 }
-/*CHashMap::Bucket* CHashMap::getFreeBucketInCacheLine( struct Segment segment)
+CHashMap::Bucket* CHashMap::getFreeBucketInCacheLine( struct Segment& segment)
 {
 	struct Bucket *bucket = segment.start_bucket;
 	while(bucket != segment.last_bucket)
@@ -67,7 +67,7 @@ CHashMap::CHashMap()
 		if(bucket->used == false)return bucket;
 	}
 	return NULL;
-}*/
+}
 CHashMap::Segment& CHashMap::getSegment(int hash)
 {
 	return segments[hash];
@@ -84,7 +84,7 @@ int CHashMap::add(int key, int data)
 	//check if the segment already has the key
 	if(contains(key))
 		return 0;
-	//struct Bucket* free_bucket = getFreeBucketInCacheLine(segment);
+	struct Bucket* free_bucket = getFreeBucketInCacheLine(segment);
 }
 int CHashMap::remove(int key)
 {
