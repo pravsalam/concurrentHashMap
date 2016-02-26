@@ -40,6 +40,9 @@ class CHashMap
 		struct Segment& getSegment(int hash);
 		struct Bucket* getFreeBucketInCacheLine(struct Segment &segment);
 		struct Bucket* getNearestFreeBucket(struct Segment &segment, struct Bucket* bucket);
+		struct Bucket* displaceTheFreeBucket(struct Segment &segment, 
+							struct Bucket *start_bucket, 
+							struct Bucket *free_bucket);
 	public:
 		CHashMap();
 		int add(int key ,int data);
@@ -59,6 +62,10 @@ CHashMap::CHashMap()
 		{
 			buckarray[i]._next_delta = -1;
 		}
+		else	
+		{
+			buckarray[i]._next_delta = i+1;
+		}
 		segments[i].start_bucket = &buckarray[i];
 		if(i+SEGMENT_SIZE > MAX_HASH_SIZE-1)
 		{
@@ -70,9 +77,36 @@ CHashMap::CHashMap()
 		}
 	}
 }
+ChashMap::Bucket* CHasMap::displaceTheFreeBucket(struct Segment& segment, 
+							struct Bucket *start_bucket, 
+							struct  Bucket *free_bucket)
+{
+	//start from bucket just before the free_bucket 
+	struct Bucket *temp = free_bucket-1;
+	int free_index = free_bucket->_first_delta;
+	while(free_bucket - temp < SEGMENT_SIZE)
+	{	
+		//key of the temp buck 
+		int key = temp->key;
+		//where does it belong is decided by hashing it
+		int hash = simplehash(key);
+		// temp really belongs to index "hash", can we move this key to free bucket location 
+		
+	}
+}
 CHashMap::Bucket* CHashMap::getNearestFreeBucket(struct Segment& segment, struct Bucket *bucket)
 {
-	//challenge, how to know we haven't hit the end of the array. may be thats why i need deltas in buckets
+	//iterate over the bucket array to find a free bucket. 
+	//necessary care is taken to make sure not to cross array boundaries.
+	//_first_delta is the current index in buckarray, _next_delta is next index
+	struct Bucket *tempbucket = bucket;
+	while(tempbucket->_first_delta <MAX_HASH_SIZE)
+	{
+		if(tempbucket->used == false)	
+			return tempbucket;
+		tempbucket++;
+	}
+	return NULL;
 }
 CHashMap::Bucket* CHashMap::getFreeBucketInCacheLine( struct Segment& segment)
 {
@@ -116,6 +150,17 @@ int CHashMap::add(int key, int data)
 	//oops couldn't find a free bucket in cacheline
 	// need to find an empty bucket and move it close to the cacheline
 	free_bucket = getNearestFreeBucket(segment, start_bucket);
+	if(free_bucket == NULL)
+	{
+		//hash is full. Currently we do not resize hash
+		return -1;
+	}
+	int distance_to_free = free_bucket - start_bucket;
+	if(distance_to_free > SEGMENT_SIZE-1)	
+	{
+		//recursively displace close to the startbucket
+		displaceTheFreeBucket(segment, start_bucket, free_bucket);
+	}
 	segment._lock.unlock();
 }
 int CHashMap::remove(int key)
