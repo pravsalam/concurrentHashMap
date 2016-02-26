@@ -49,6 +49,7 @@ class CHashMap
 		int remove(int key );
 		bool contains(int key);
 		int get(int key);
+		//void printContent();
 	
 		
 };
@@ -77,13 +78,14 @@ CHashMap::CHashMap()
 		}
 	}
 }
-ChashMap::Bucket* CHasMap::displaceTheFreeBucket(struct Segment& segment, 
+CHashMap::Bucket* CHashMap::displaceTheFreeBucket(struct Segment& segment, 
 							struct Bucket *start_bucket, 
 							struct  Bucket *free_bucket)
 {
 	//start from bucket just before the free_bucket 
-	struct Bucket *temp = free_bucket-1;
+	struct Bucket *temp = free_bucket-(SEGMENT_SIZE-1);
 	int free_index = free_bucket->_first_delta;
+	bool moved = false;
 	while(free_bucket - temp < SEGMENT_SIZE)
 	{	
 		//key of the temp buck 
@@ -91,7 +93,36 @@ ChashMap::Bucket* CHasMap::displaceTheFreeBucket(struct Segment& segment,
 		//where does it belong is decided by hashing it
 		int hash = simplehash(key);
 		// temp really belongs to index "hash", can we move this key to free bucket location 
-		
+		if(free_index - hash  > SEGMENT_SIZE-1)
+		{
+			//can not move temp to free_bucket. 
+			//Free_bucket is too far from the cacheline of temp's original bucket
+			temp++;
+			continue;
+		}
+		else
+		{	
+			//we can move the temp to free_bucket
+			free_bucket->used = true;
+			free_bucket->key = temp->key;
+			free_bucket->data = temp->data;
+			//no need to update the _first_delta or _next_delta;  deltas are never updated
+			free_bucket = temp;
+			moved = true;
+			break;
+		}
+	}
+	if(!moved)
+	{
+		//we could not move free_bucket closer to start_bucket
+		return NULL;
+	}
+	//ok now we could move  free bucket little closer  to the  start_bucket 
+	int current_distance = free_bucket - start_bucket;
+	if(current_distance > SEGMENT_SIZE -1)
+	{
+		//we still need to move free_bucket close to the start_bucket
+		return displaceTheFreeBucket(segment, start_bucket, free_bucket);
 	}
 }
 CHashMap::Bucket* CHashMap::getNearestFreeBucket(struct Segment& segment, struct Bucket *bucket)
