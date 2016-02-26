@@ -49,7 +49,7 @@ class CHashMap
 		int remove(int key );
 		bool contains(int key);
 		int get(int key);
-		//void printContent();
+		void printContent();
 	
 		
 };
@@ -154,9 +154,6 @@ CHashMap::Segment& CHashMap::getSegment(int hash)
 }
 int CHashMap::add(int key, int data)
 {
-	assert(key<MAX_HASH_SIZE);
-	arr[key] = data;
-	return 0;
 	// hopscotch segments
 	//get the segment and find a bucket to put the key and data
 	struct Segment& segment = getSegment(simplehash(key));
@@ -202,11 +199,6 @@ int CHashMap::remove(int key)
 }
 bool CHashMap::contains(int key)
 {
-	assert(key<MAX_HASH_SIZE);
-	if(arr[key] != -1)
-		return true;
-	else return false;
-	
 	//hopscotch
 	struct Segment& segment = getSegment(simplehash(key));
 	struct Bucket* bucket = segment.start_bucket;
