@@ -82,9 +82,20 @@ int CHashMap::add(int key, int data)
 	struct Segment& segment = getSegment(simplehash(key));
 	struct Bucket* start_bucket = segment.start_bucket;
 	//check if the segment already has the key
+	segment._lock.lock();
 	if(contains(key))
+	{
+		segment._lock.unlock();
 		return 0;
+	}
 	struct Bucket* free_bucket = getFreeBucketInCacheLine(segment);
+	if(free_bucket != NULL)
+	{
+		free_bucket->used = true;
+		free_bucket->key = key;
+		free_bucket->data = data;
+	}
+	segment._lock.unlock();
 }
 int CHashMap::remove(int key)
 {
