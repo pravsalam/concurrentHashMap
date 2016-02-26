@@ -4,6 +4,7 @@
 #include<mutex>
 #define MAX_HASH_SIZE  1000
 #define SEGMENT_SIZE 32
+#define INVALID_INDEX -1
 using namespace std;
 int simplehash(long int n);
 void threadfunc(void *ptr,int id);
@@ -21,6 +22,10 @@ class CHashMap
 			int key;
 			int data;
 			bool used;
+			//current index in the hash
+			int _first_delta;
+			// next index in the hash
+			int _next_delta;
 		};
 		struct Segment
 		{
@@ -34,6 +39,7 @@ class CHashMap
 		struct Segment segments[MAX_HASH_SIZE];
 		struct Segment& getSegment(int hash);
 		struct Bucket* getFreeBucketInCacheLine(struct Segment &segment);
+		struct Bucket* getNearestFreeBucket(struct Segment &segment, struct Bucket* bucket);
 	public:
 		CHashMap();
 		int add(int key ,int data);
@@ -48,6 +54,11 @@ CHashMap::CHashMap()
 	for(int i = 0;i < MAX_HASH_SIZE;i++)
 	{
 		buckarray[i].used = false;
+		buckarray[i]._first_delta = i;
+		if(i == MAX_HASH_SIZE-1)
+		{
+			buckarray[i]._next_delta = -1;
+		}
 		segments[i].start_bucket = &buckarray[i];
 		if(i+SEGMENT_SIZE > MAX_HASH_SIZE-1)
 		{
@@ -58,6 +69,10 @@ CHashMap::CHashMap()
 			segments[i].last_bucket = &buckarray[i+SEGMENT_SIZE];
 		}
 	}
+}
+CHashMap::Bucket* CHashMap::getNearestFreeBucket(struct Segment& segment, struct Bucket *bucket)
+{
+	//challenge, how to know we haven't hit the end of the array. may be thats why i need deltas in buckets
 }
 CHashMap::Bucket* CHashMap::getFreeBucketInCacheLine( struct Segment& segment)
 {
@@ -88,13 +103,19 @@ int CHashMap::add(int key, int data)
 		segment._lock.unlock();
 		return 0;
 	}
+	
+	//if there is a free bucket available  in cacheline use it 
 	struct Bucket* free_bucket = getFreeBucketInCacheLine(segment);
 	if(free_bucket != NULL)
 	{
 		free_bucket->used = true;
 		free_bucket->key = key;
 		free_bucket->data = data;
+		return 0;
 	}
+	//oops couldn't find a free bucket in cacheline
+	// need to find an empty bucket and move it close to the cacheline
+	free_bucket = getNearestFreeBucket(segment, start_bucket);
 	segment._lock.unlock();
 }
 int CHashMap::remove(int key)
