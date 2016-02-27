@@ -11,6 +11,12 @@ void threadfunc(void *ptr,int id);
 //take care of exceptin handling
 //instead of using error codes, use exception
 
+// pending tasks
+// 1. resizing the hash,
+// 2. is Array right DS? Should we use some other DS for easy resizing
+// 3. improving remove functionality with cachealignment improvement
+
+
 
 //hopscotch hashing algorithm 
 class CHashMap
@@ -173,6 +179,7 @@ int CHashMap::add(int key, int data)
 		free_bucket->used = true;
 		free_bucket->key = key;
 		free_bucket->data = data;
+		segment._lock.unlock();
 		return 0;
 	}
 	//oops couldn't find a free bucket in cacheline
@@ -181,6 +188,7 @@ int CHashMap::add(int key, int data)
 	if(free_bucket == NULL)
 	{
 		//hash is full. Currently we do not resize hash
+		segment._lock.unlock();
 		return -1;
 	}
 	int distance_to_free = free_bucket - start_bucket;
