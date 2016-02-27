@@ -34,7 +34,7 @@ class CHashMap
 			// mutex protects the segment
 			std::mutex _lock;
 		};
-		int arr[MAX_HASH_SIZE];
+		//int arr[MAX_HASH_SIZE];
 		struct Bucket buckarray[MAX_HASH_SIZE];
 		struct Segment segments[MAX_HASH_SIZE];
 		struct Segment& getSegment(int hash);
@@ -193,9 +193,26 @@ int CHashMap::add(int key, int data)
 }
 int CHashMap::remove(int key)
 {
-	assert(key<MAX_HASH_SIZE);
-	arr[key] = -1;
-	return 0;
+	//remove 
+	int hash = simplehash(key);
+	struct Segment& segment = getSegment(hash);
+	//search all buckets in the segment that has the key passed in. 
+	segment._lock.lock();
+	struct Bucket* bucket = segment.start_bucket;
+	while(bucket != segment.last_bucket)
+	{
+		if(bucket->key == key)
+		{
+			//free the bucket
+			bucket->used  = false;
+			segment._lock.unlock();
+			//cache alignment need to be implemented
+			return bucket->data;
+		}
+		bucket++;
+	}
+	segment._lock.unlock();
+	return -1;
 }
 bool CHashMap::contains(int key)
 {
@@ -203,7 +220,7 @@ bool CHashMap::contains(int key)
 	struct Segment& segment = getSegment(simplehash(key));
 	struct Bucket* bucket = segment.start_bucket;
 	struct Bucket *last_bucket = segment.last_bucket;
-	while(bucket != last_bucket)
+	while(bucket <= last_bucket)
 	{	
 		if(bucket->key == key)
 			return true;
@@ -215,8 +232,22 @@ bool CHashMap::contains(int key)
 }
 int CHashMap::get(int key)
 {
-	if(contains(key)) return arr[key];
-	else return -1;
+	int hash = simplehash(key);
+	struct Segment& segment = getSegment(hash);
+	struct Bucket *bucket = segment.start_bucket;
+	while(bucket <= segment.last_bucket){
+		if(bucket->key == key)
+			return bucket->data;
+		bucket++;
+	}
+	return -1;
+}
+void CHashMap::printContent()
+{
+	for(int i =0;i < MAX_HASH_SIZE;i++)
+	{
+		cout<<buckarray[i].key<<"                    "<<buckarray[i].data<<endl;
+	}	
 }
 
 int main()
