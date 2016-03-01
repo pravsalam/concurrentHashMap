@@ -2,8 +2,9 @@
 #include<assert.h>
 #include<thread>
 #include<mutex>
-#define MAX_HASH_SIZE  1000
-#define SEGMENT_SIZE 32
+#include<atomic>
+#define MAX_HASH_SIZE  10
+#define SEGMENT_SIZE 3
 #define INVALID_INDEX -1
 using namespace std;
 int simplehash(long int n);
@@ -28,6 +29,7 @@ class CHashMap
 			int key;
 			int data;
 			bool used;
+			std::atomic<bool> atomic_used;
 			//current index in the hash
 			int _first_delta;
 			// next index in the hash
@@ -44,7 +46,8 @@ class CHashMap
 		struct Bucket buckarray[MAX_HASH_SIZE];
 		struct Segment segments[MAX_HASH_SIZE];
 		struct Segment& getSegment(int hash);
-		struct Bucket* getFreeBucketInCacheLine(struct Segment &segment);
+		struct Bucket* getBucket(int hash);
+		struct Bucket* getFreeBucketInCacheLine(const struct Segment& segment, struct Bucket* const start_bucket);
 		struct Bucket* getNearestFreeBucket(struct Segment &segment, struct Bucket* bucket);
 		struct Bucket* displaceTheFreeBucket(struct Segment &segment, 
 							struct Bucket *start_bucket, 
@@ -64,6 +67,7 @@ CHashMap::CHashMap()
 	for(int i = 0;i < MAX_HASH_SIZE;i++)
 	{
 		buckarray[i].used = false;
+		buckarray[i].atomic_used.store(false);
 		buckarray[i]._first_delta = i;
 		if(i == MAX_HASH_SIZE-1)
 		{
@@ -73,6 +77,8 @@ CHashMap::CHashMap()
 		{
 			buckarray[i]._next_delta = i+1;
 		}
+		buckarray[i].key = -1;
+		buckarray[i].data = -1;
 		segments[i].start_bucket = &buckarray[i];
 		if(i+SEGMENT_SIZE > MAX_HASH_SIZE-1)
 		{
@@ -80,7 +86,7 @@ CHashMap::CHashMap()
 		}
 		else
 		{
-			segments[i].last_bucket = &buckarray[i+SEGMENT_SIZE];
+			segments[i].last_bucket = &buckarray[i+SEGMENT_SIZE-1];
 		}
 	}
 }
@@ -88,6 +94,7 @@ CHashMap::Bucket* CHashMap::displaceTheFreeBucket(struct Segment& segment,
 							struct Bucket *start_bucket, 
 							struct  Bucket *free_bucket)
 {
+	cout<<"displace the free bucket called"<<endl;
 	//start from bucket just before the free_bucket 
 	struct Bucket *temp = free_bucket-(SEGMENT_SIZE-1);
 	int free_index = free_bucket->_first_delta;
@@ -109,11 +116,16 @@ CHashMap::Bucket* CHashMap::displaceTheFreeBucket(struct Segment& segment,
 		else
 		{	
 			//we can move the temp to free_bucket
+			int tempkey = free_bucket->key;
+			int tempdata = free_bucket->data;
 			free_bucket->used = true;
 			free_bucket->key = temp->key;
 			free_bucket->data = temp->data;
 			//no need to update the _first_delta or _next_delta;  deltas are never updated
 			free_bucket = temp;
+			free_bucket->key = tempkey;
+			free_bucket->data = tempdata;
+			
 			moved = true;
 			break;
 		}
@@ -128,6 +140,7 @@ CHashMap::Bucket* CHashMap::displaceTheFreeBucket(struct Segment& segment,
 	if(current_distance > SEGMENT_SIZE -1)
 	{
 		//we still need to move free_bucket close to the start_bucket
+		cout<<"inside displace the free bucket"<<endl;
 		return displaceTheFreeBucket(segment, start_bucket, free_bucket);
 	}
 }
@@ -136,21 +149,44 @@ CHashMap::Bucket* CHashMap::getNearestFreeBucket(struct Segment& segment, struct
 	//iterate over the bucket array to find a free bucket. 
 	//necessary care is taken to make sure not to cross array boundaries.
 	//_first_delta is the current index in buckarray, _next_delta is next index
+	cout<<"temp bucket called"<<endl;
 	struct Bucket *tempbucket = bucket;
+	bool expected  = false;
 	while(tempbucket->_first_delta <MAX_HASH_SIZE)
 	{
-		if(tempbucket->used == false)	
+		cout<<"index = "<< tempbucket - buckarray<<" before atomic set value ="<<tempbucket->atomic_used.load()<<endl;
+		if(tempbucket->atomic_used.compare_exchange_strong(expected, true,memory_order_release, memory_order_relaxed))
+		{
+			cout<<"atomic set check "<<tempbucket->atomic_used.load()<<endl;
 			return tempbucket;
+		}
+		else if(tempbucket->atomic_used.load() ==false)
+		{
+			cout<<"failed spuriously "<<tempbucket->atomic_used.load()<<endl;
+		}
+		//if(tempbucket->used == false)	return tempbucket;
 		tempbucket++;
+		expected = false;
 	}
 	return NULL;
 }
-CHashMap::Bucket* CHashMap::getFreeBucketInCacheLine( struct Segment& segment)
+CHashMap::Bucket* CHashMap::getFreeBucketInCacheLine( const Segment& segment,  struct Bucket* const start_bucket)
 {
-	struct Bucket *bucket = segment.start_bucket;
-	while(bucket != segment.last_bucket)
+	struct Bucket *bucket = start_bucket;
+	//cout<<"start bucket index "<<bucket->_first_delta<<endl;
+	bool expected = false;
+	while(bucket <= segment.last_bucket)
 	{
-		if(bucket->used == false)return bucket;
+		cout<<"start bucket index "<<bucket->_first_delta<<" used "<<bucket->atomic_used.load()<<endl;
+		if(bucket->atomic_used.compare_exchange_strong(expected, true,memory_order_release, memory_order_relaxed))
+			return bucket;
+		else if(bucket->atomic_used.load() == false)
+		{
+			cout<<"failed spuriously"<<endl;
+		}
+		//if(bucket->used == false) return bucket;
+		bucket++;
+		expected = false;
 	}
 	return NULL;
 }
@@ -158,45 +194,62 @@ CHashMap::Segment& CHashMap::getSegment(int hash)
 {
 	return segments[hash];
 }
+CHashMap::Bucket* CHashMap::getBucket(int hash)
+{
+	return &buckarray[hash];
+}
 int CHashMap::add(int key, int data)
 {
 	// hopscotch segments
 	//get the segment and find a bucket to put the key and data
+	//cout<<"inside add key ="<<key<<" data "<<data<<endl;
 	struct Segment& segment = getSegment(simplehash(key));
-	struct Bucket* start_bucket = segment.start_bucket;
+	struct Bucket* start_bucket = getBucket(simplehash(key));
+
 	//check if the segment already has the key
 	segment._lock.lock();
 	if(contains(key))
 	{
+		cout<<"key already present"<<endl;
 		segment._lock.unlock();
 		return 0;
 	}
 	
 	//if there is a free bucket available  in cacheline use it 
-	struct Bucket* free_bucket = getFreeBucketInCacheLine(segment);
+	struct Bucket* free_bucket = getFreeBucketInCacheLine(segment, start_bucket);
 	if(free_bucket != NULL)
 	{
+		cout<<"found a free bucket in cacheline"<<endl;
 		free_bucket->used = true;
 		free_bucket->key = key;
 		free_bucket->data = data;
 		segment._lock.unlock();
+		cout<<" added key and data"<<endl;
 		return 0;
 	}
+	cout<<"no free bucket in cacheline"<<endl;
 	//oops couldn't find a free bucket in cacheline
 	// need to find an empty bucket and move it close to the cacheline
 	free_bucket = getNearestFreeBucket(segment, start_bucket);
 	if(free_bucket == NULL)
 	{
 		//hash is full. Currently we do not resize hash
+		cout<<"could not find a free bucked"<<endl;
 		segment._lock.unlock();
 		return -1;
 	}
+	free_bucket->key = key;
+	free_bucket->used = true;
+	free_bucket->data = data;
 	int distance_to_free = free_bucket - start_bucket;
+	cout<<"distance to free bucket "<< distance_to_free<<endl;
 	if(distance_to_free > SEGMENT_SIZE-1)	
 	{
 		//recursively displace close to the startbucket
-		displaceTheFreeBucket(segment, start_bucket, free_bucket);
+		cout<<"free bucket is too far"<<endl;
+		free_bucket = displaceTheFreeBucket(segment, start_bucket, free_bucket);
 	}
+	cout<<"done add"<<endl;
 	segment._lock.unlock();
 }
 int CHashMap::remove(int key)
@@ -252,9 +305,13 @@ int CHashMap::get(int key)
 }
 void CHashMap::printContent()
 {
+	cout<<"=================================================="<<endl;
+	cout<<"Content of the hash table"<<endl;
+	cout<<"=================================================="<<endl;
+	
 	for(int i =0;i < MAX_HASH_SIZE;i++)
 	{
-		cout<<buckarray[i].key<<"                    "<<buckarray[i].data<<endl;
+		cout<<i<<"   "<<buckarray[i].key<<"         "<<buckarray[i].data<<endl;
 	}	
 }
 
@@ -265,9 +322,10 @@ int main()
 	int data;
 	CHashMap map;
 	thread thread1(threadfunc, &map,1);
-	thread thread2(threadfunc, &map,2);
+	//thread thread2(threadfunc, &map,2);
 	thread1.join();
-	thread2.join();
+	//thread2.join();
+	map.printContent();
 }
 int simplehash(long int n)
 {
@@ -276,20 +334,12 @@ int simplehash(long int n)
 void threadfunc(void *ptr,int id)
 {
 	CHashMap *map = (CHashMap *)ptr;
-	int count = 5;	
+	int count = 10;	
 	while(count){
-		int key = rand()%10;
-		int data = rand()%10000;
+		int key = rand()%20;
+		int data = rand()%100;
 		map->add(key, data);
-		cout<<id<<" "<<key<<endl;
-		if(!map->contains(key))
-		{	
-			cout<<"BOOM"<<endl;
-		}	
-		else
-		{
-			cout<<"Cool"<<endl;
-		}
+		cout<<id<<"    "<<key<<"   "<<data<<endl;
 		count--;
 	}
 }
